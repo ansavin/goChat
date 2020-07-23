@@ -20,6 +20,8 @@ type User struct {
 type Thread map[int]*User
 
 const(
+	HISTORY_MESSAGES = 5
+
 	Offilne = iota
 	Online
 )
@@ -41,13 +43,16 @@ func main() {
 	rand.Seed(time.Now().Unix())
 
 	t := make(Thread)
+
+	var history []string
+
 	for {
 		c, err := l.Accept()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		newUser := handleConnection(c, &t)
+		newUser := handleConnection(c, &t, &history)
 		if newUser.Id == 0 {
 			continue
 		}
@@ -56,16 +61,24 @@ func main() {
 	}
 }
 
-func handleConnection(c net.Conn, input *Thread) *User {
+func handleConnection(c net.Conn, input *Thread, history *[]string) *User {
 	fmt.Printf("Serving %s\n", c.RemoteAddr().String())
 
 	ch := make(chan string, 5)
 
 	id := rand.Int()
 
+	c.Write([]byte(fmt.Sprintf(
+		"Welcome to our chat! Last %d messages:\n",
+		len(*history))))
+
+	for _, msg := range *history {
+		c.Write([]byte(msg))
+	}
+
 	c.Write([]byte("Enter your username:\n"))
 
-	go communicate(c, input, ch, id)
+	go communicate(c, input, ch, id, history)
 
 	// We use this "fake" name to create a notification about new user
 	return &User{
@@ -76,7 +89,12 @@ func handleConnection(c net.Conn, input *Thread) *User {
 	}
 }
 
-func communicate(c net.Conn, input *Thread, out chan string, currentUserId int) {
+func communicate(
+		c net.Conn,
+		input *Thread,
+		out chan string,
+		currentUserId int,
+		history *[]string) {
 	defer c.Close()
 
 	// We assume that the first thing user should write is his name
@@ -100,7 +118,8 @@ func communicate(c net.Conn, input *Thread, out chan string, currentUserId int) 
 				broadcast(
 					fmt.Sprintf("User %s left the chat\n", (*input)[currentUserId].Name),
 					input,
-					currentUserId)
+					currentUserId,
+					history)
 				close(out)
 				delete(*input, currentUserId)
 				return
@@ -137,7 +156,8 @@ func communicate(c net.Conn, input *Thread, out chan string, currentUserId int) 
 						oldName,
 						(*input)[currentUserId].Name),
 					input,
-					currentUserId)
+					currentUserId,
+					history)
 				renameInProgress = false
 				continue
 			}
@@ -145,7 +165,7 @@ func communicate(c net.Conn, input *Thread, out chan string, currentUserId int) 
 			if !renameInProgress {
 				incomingText = incomingText + "\n"
 
-				broadcast(incomingText, input, currentUserId)
+				broadcast(incomingText, input, currentUserId, history)
 			}
 
 		case incomingMsg := <- out:
@@ -170,7 +190,7 @@ func waitForTextInput(c net.Conn, input *Thread, currentUserId int, out chan str
 	}
 }
 
-func broadcast(msg string, input *Thread, currentUserId int) {
+func broadcast(msg string, input *Thread, currentUserId int, history *[]string) {
 	fmt.Println("Enter broadcast...")
 
 	for _,user := range *input {
@@ -181,7 +201,15 @@ func broadcast(msg string, input *Thread, currentUserId int) {
 
 		fmt.Printf("Write to user %d chan...\n", user.Id)
 
-		user.Ch <- fmt.Sprintf("[%s]: %s", (*input)[currentUserId].Name, msg)
+		msgToSend := fmt.Sprintf("[%s]: %s", (*input)[currentUserId].Name, msg)
+
+		user.Ch <- msgToSend
+
+		*history = append(*history, msgToSend)
+
+		if len(*history) > HISTORY_MESSAGES {
+			*history = (*history)[1:HISTORY_MESSAGES]
+		}
 
 		fmt.Println("Done!")
 	}
