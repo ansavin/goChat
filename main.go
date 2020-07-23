@@ -67,9 +67,10 @@ func handleConnection(c net.Conn, input *Thread) *User {
 
 	go communicate(c, input, ch, id)
 
+	// We use this "fake" name to create a notification about new user
 	return &User{
 		Id: id,
-		Name: "anonimus",
+		Name: "sign in and",
 		Ch: ch,
 		Status: Online,
 	}
